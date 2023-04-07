@@ -5,7 +5,7 @@ services:
     # If the FQDN for your mail-server is only two labels (eg: example.com),
     # you can assign this entirely to `hostname` and remove `domainname`.
     hostname: mail
-    domainname: example.com
+    domainname: stillon.top
     env_file: mailserver.env
     # More information about the mail-server ports:
     # https://docker-mailserver.github.io/docker-mailserver/latest/config/security/understanding-the-ports/
@@ -16,13 +16,17 @@ services:
       - "465:465"  # ESMTP (implicit TLS)
       - "587:587"  # ESMTP (explicit TLS => STARTTLS)
       - "993:993"  # IMAP4 (implicit TLS)
+    networks:
+      - traefik
+      - dns
+      - monitoring
     volumes:
       - ./docker-data/dms/mail-data/:/var/mail/
       - ./docker-data/dms/mail-state/:/var/mail-state/
       - ./docker-data/dms/mail-logs/:/var/log/mail/
       - ./docker-data/dms/config/:/tmp/docker-mailserver/
       - /etc/localtime:/etc/localtime:ro
-    restart: always
+    restart: unless-stopped
     stop_grace_period: 1m
     cap_add:
       - NET_ADMIN
@@ -30,3 +34,37 @@ services:
       test: "ss --listening --tcp | grep -P 'LISTEN.+:smtp' || exit 1"
       timeout: 3s
       retries: 0
+    
+  roundcube:
+    image: roundcube/roundcubemail
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    environment:
+      - ROUNDCUBEMAIL_DEFAULT_HOST=mailserver
+      - ROUNDCUBEMAIL_DEFAULT_PORT=143
+      - ROUNDCUBEMAIL_SMTP_SERVER=mailserver
+      - ROUNDCUBEMAIL_SMTP_PORT=587
+      - ROUNDCUBEMAIL_PLUGINS=archive,zipdownload
+    volumes:
+      - ./roundcubedata:/var/roundcube
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.roundcube.rule=Host(`webmail.stillon.top`)"
+      - "traefik.http.routers.roundcube.entrypoints=websecure"
+      - "traefik.http.routers.roundcube.tls=true"
+      - "traefik.http.routers.roundcube.tls.certresolver=lets-encr"
+      - "traefik.http.routers.roundcube.middlewares=authelia@file"
+      - "traefik.http.services.roundcube.loadbalancer.server.port=80"
+    networks:
+      - traefik
+      - dns
+      - monitoring
+
+networks:
+  traefik:
+    external: true
+  dns:
+    external: true
+  monitoring:
+    external: true
